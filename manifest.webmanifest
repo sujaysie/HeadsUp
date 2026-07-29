@@ -1,0 +1,17 @@
+{
+  "name": "HeadsUp Party Cards",
+  "short_name": "HeadsUp",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#101522",
+  "theme_color": "#121826",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
