@@ -1,4 +1,4 @@
-const CACHE_NAME = "headsup-party-cards-v1";
+const CACHE_NAME = "headsup-party-cards-v2";
 const ASSETS = [
   "./",
   "./index.html",

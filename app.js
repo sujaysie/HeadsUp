@@ -43,6 +43,16 @@ const state = {
   game: null,
   timerId: null,
   countdownId: null,
+  feedbackTimerId: null,
+  audioContext: null,
+  motion: {
+    active: false,
+    listening: false,
+    neutralPitch: null,
+    lastPitch: null,
+    armed: true,
+    debounceUntil: 0,
+  },
 };
 
 const screens = {
@@ -63,9 +73,9 @@ const els = {
   countdownNumber: document.querySelector("#countdownNumber"),
   timeRemaining: document.querySelector("#timeRemaining"),
   scoreValue: document.querySelector("#scoreValue"),
-  categoryName: document.querySelector("#categoryName"),
   currentWord: document.querySelector("#currentWord"),
   cueStage: document.querySelector("#cueStage"),
+  motionFeedback: document.querySelector("#motionFeedback"),
   skipButton: document.querySelector("#skipButton"),
   correctButton: document.querySelector("#correctButton"),
   finalScore: document.querySelector("#finalScore"),
@@ -402,13 +412,15 @@ function shuffle(items) {
   return copy;
 }
 
-function startCountdown() {
+async function startCountdown() {
   const collection = getSelectedCollection();
   const cards = collection.cards.map((card) => (typeof card === "string" ? card : card.text)).filter(Boolean);
   if (!cards.length) {
     alert("Add at least one cue card before playing this collection.");
     return;
   }
+  await prepareMotionControls();
+  unlockAudio();
   clearGameTimers();
   state.game = {
     collectionId: collection.id,
@@ -421,6 +433,7 @@ function startCountdown() {
     correct: [],
     skipped: [],
     finished: false,
+    transitioning: false,
   };
   els.countdownNumber.textContent = "3";
   showScreen("countdown");
@@ -439,6 +452,7 @@ function startCountdown() {
 }
 
 function startRound() {
+  calibrateMotion();
   nextWord();
   updateGameUi();
   showScreen("game");
@@ -459,34 +473,46 @@ function nextWord() {
 }
 
 function markCurrent(result) {
-  if (!state.game || state.game.finished || !state.game.currentWord) return;
+  if (!state.game || state.game.finished || state.game.transitioning || !state.game.currentWord) return;
+  state.game.transitioning = true;
   if (result === "correct") {
     state.game.score += 1;
     state.game.correct.push(state.game.currentWord);
   } else {
     state.game.skipped.push(state.game.currentWord);
   }
-  pulse();
-  nextWord();
-  updateGameUi();
+  state.motion.armed = false;
+  state.motion.debounceUntil = Date.now() + 700;
+  showMotionFeedback(result);
+  pulse(result);
+  playTone(result);
+  window.setTimeout(() => {
+    if (!state.game || state.game.finished) return;
+    nextWord();
+    state.game.transitioning = false;
+    updateGameUi();
+  }, 320);
 }
 
 function updateGameUi() {
   if (!state.game) return;
   els.timeRemaining.textContent = String(Math.max(0, state.game.timeRemaining));
   els.scoreValue.textContent = String(state.game.score);
-  els.categoryName.textContent = state.game.collectionName;
   els.currentWord.textContent = state.game.currentWord;
 }
 
 function clearGameTimers() {
   clearInterval(state.timerId);
   clearInterval(state.countdownId);
+  clearTimeout(state.feedbackTimerId);
+  stopMotionControls();
+  clearMotionFeedback();
 }
 
 function finishRound() {
   if (!state.game || state.game.finished) return;
   state.game.finished = true;
+  stopMotionControls();
   clearGameTimers();
   els.finalScore.textContent = String(state.game.score);
   renderWordList(els.correctList, state.game.correct, "No correct cards this round.");
@@ -521,8 +547,106 @@ function saveScore() {
   saveJson(SCORES_KEY, scores.slice(0, 8));
 }
 
-function pulse() {
-  if (navigator.vibrate) navigator.vibrate(35);
+function showMotionFeedback(result) {
+  clearMotionFeedback();
+  const isCorrect = result === "correct";
+  els.cueStage.classList.add(isCorrect ? "feedback-correct" : "feedback-skip");
+  els.motionFeedback.textContent = isCorrect ? "Correct" : "Pass";
+  els.motionFeedback.classList.add("is-visible");
+  state.feedbackTimerId = window.setTimeout(clearMotionFeedback, 420);
+}
+
+function clearMotionFeedback() {
+  els.cueStage.classList.remove("feedback-correct", "feedback-skip");
+  els.motionFeedback.classList.remove("is-visible");
+  els.motionFeedback.textContent = "";
+}
+
+function pulse(result = "correct") {
+  if (!navigator.vibrate) return;
+  navigator.vibrate(result === "correct" ? 45 : [25, 35, 25]);
+}
+
+function unlockAudio() {
+  if (state.audioContext) return;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  state.audioContext = new AudioContext();
+  state.audioContext.resume?.();
+}
+
+function playTone(result) {
+  const context = state.audioContext;
+  if (!context) return;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const now = context.currentTime;
+  oscillator.type = "sine";
+  oscillator.frequency.value = result === "correct" ? 660 : 260;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.08, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(now);
+  oscillator.stop(now + 0.18);
+}
+
+async function prepareMotionControls() {
+  if (!("DeviceOrientationEvent" in window)) return;
+  const orientation = window.DeviceOrientationEvent;
+  if (typeof orientation.requestPermission === "function") {
+    try {
+      const permission = await orientation.requestPermission();
+      if (permission !== "granted") return;
+    } catch {
+      return;
+    }
+  }
+  if (!state.motion.listening) {
+    window.addEventListener("deviceorientation", handleDeviceOrientation);
+    state.motion.listening = true;
+  }
+}
+
+function calibrateMotion() {
+  state.motion.active = true;
+  state.motion.neutralPitch = state.motion.lastPitch;
+  state.motion.armed = true;
+  state.motion.debounceUntil = Date.now() + 700;
+}
+
+function stopMotionControls() {
+  state.motion.active = false;
+  state.motion.neutralPitch = null;
+  state.motion.armed = true;
+}
+
+function handleDeviceOrientation(event) {
+  if (typeof event.beta !== "number") return;
+  state.motion.lastPitch = event.beta;
+  if (!state.motion.active || !state.game || state.game.finished) return;
+  if (state.motion.neutralPitch === null) {
+    state.motion.neutralPitch = event.beta;
+    return;
+  }
+
+  const delta = normalizeAngle(event.beta - state.motion.neutralPitch);
+  const now = Date.now();
+  if (!state.motion.armed) {
+    if (Math.abs(delta) <= 15 && now >= state.motion.debounceUntil) {
+      state.motion.armed = true;
+    }
+    return;
+  }
+  if (now < state.motion.debounceUntil) return;
+  if (delta >= 45) markCurrent("correct");
+  if (delta <= -45) markCurrent("skip");
+}
+
+function normalizeAngle(value) {
+  if (value > 180) return value - 360;
+  if (value < -180) return value + 360;
+  return value;
 }
 
 function wireGestures() {

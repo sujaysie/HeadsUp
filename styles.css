@@ -348,10 +348,10 @@ select:focus {
 }
 
 .cue-stage {
+  position: relative;
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 18px;
   min-height: 360px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
@@ -363,13 +363,7 @@ select:focus {
   text-align: center;
   touch-action: none;
   user-select: none;
-}
-
-.cue-stage p {
-  color: var(--accent);
-  font-size: 1rem;
-  font-weight: 900;
-  text-transform: uppercase;
+  overflow: hidden;
 }
 
 .cue-stage h2 {
@@ -381,20 +375,46 @@ select:focus {
   overflow-wrap: anywhere;
 }
 
-.swipe-hints {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  color: var(--muted);
-  font-weight: 800;
+.cue-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
 }
 
-.swipe-hints span {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.16);
+.cue-stage.feedback-correct::after {
+  background: rgba(84, 209, 139, 0.32);
+  opacity: 1;
+}
+
+.cue-stage.feedback-skip::after {
+  background: rgba(255, 207, 90, 0.28);
+  opacity: 1;
+}
+
+.motion-feedback {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(18px, 5vw, 44px);
+  transform: translateX(-50%) translateY(10px);
+  border-radius: 8px;
+  background: rgba(9, 12, 19, 0.72);
+  color: var(--ink);
+  font-size: clamp(1.1rem, 3vw, 2rem);
+  font-weight: 900;
+  opacity: 0;
+  padding: 10px 18px;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+  z-index: 1;
+}
+
+.motion-feedback.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .game-actions {
