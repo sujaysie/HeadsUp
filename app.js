@@ -225,6 +225,7 @@ function renderCollectionEditor() {
   const cardSearch = els.collectionEditor.querySelector("#cardSearchInput");
   const cardList = els.collectionEditor.querySelector("#cardList");
   const cardCount = els.collectionEditor.querySelector("#cardCountLabel");
+  const importInput = els.collectionEditor.querySelector("#importCollectionInput");
 
   nameInput.value = collection.name;
   nameInput.addEventListener("change", () => {
@@ -235,6 +236,8 @@ function renderCollectionEditor() {
     renderCollections();
   });
 
+  els.collectionEditor.querySelector("#exportCollectionButton").addEventListener("click", () => exportCollectionCsv(collection));
+  importInput.addEventListener("change", () => importCollectionCsv(collection, importInput.files?.[0]));
   els.collectionEditor.querySelector("#duplicateCollectionButton").addEventListener("click", () => duplicateCollection(collection.id));
   els.collectionEditor.querySelector("#deleteCollectionButton").addEventListener("click", () => deleteCollection(collection.id));
 
@@ -401,6 +404,124 @@ function moveCard(collection, id, direction) {
   touchCollection(collection);
   persistCollections();
   renderCollectionEditor();
+}
+
+function exportCollectionCsv(collection) {
+  const csv = [
+    "text",
+    ...collection.cards.map((card) => escapeCsvValue(card.text)),
+  ].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${slugify(collection.name) || "collection"}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importCollectionCsv(collection, file) {
+  if (!file) return;
+  try {
+    const csv = await file.text();
+    const imported = parseCueCardsCsv(csv);
+    const added = addImportedCards(collection, imported);
+    alert(added ? `Imported ${added} cue cards.` : "No new cue cards found in that CSV.");
+  } catch {
+    alert("That CSV could not be imported. Use a CSV with a text column or one card per row.");
+  } finally {
+    renderCollectionEditor();
+  }
+}
+
+function addImportedCards(collection, values) {
+  let added = 0;
+  values.forEach((value) => {
+    const text = normalizeCard(value);
+    if (!text || hasDuplicate(collection, text)) return;
+    collection.cards.push({
+      id: createId(),
+      text,
+      order: collection.cards.length,
+      createdAt: new Date().toISOString(),
+    });
+    added += 1;
+  });
+  if (added) {
+    touchCollection(collection);
+    persistCollections();
+    renderCategorySelect();
+  }
+  return added;
+}
+
+function escapeCsvValue(value) {
+  const text = String(value ?? "");
+  if (!/[",\r\n]/.test(text)) return text;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function parseCueCardsCsv(csv) {
+  const rows = parseCsvRows(csv);
+  if (!rows.length) return [];
+  const header = rows[0].map((cell) => cell.trim().toLowerCase());
+  const textIndex = header.indexOf("text");
+  const startIndex = textIndex >= 0 ? 1 : 0;
+  const columnIndex = textIndex >= 0 ? textIndex : 0;
+  return rows.slice(startIndex).map((row) => row[columnIndex] || "");
+}
+
+function parseCsvRows(csv) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < csv.length; index += 1) {
+    const char = csv[index];
+    const next = csv[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(value);
+      if (row.some((cell) => cell.trim())) rows.push(row);
+      row = [];
+      value = "";
+      continue;
+    }
+
+    value += char;
+  }
+
+  row.push(value);
+  if (row.some((cell) => cell.trim())) rows.push(row);
+  return rows;
+}
+
+function slugify(value) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function shuffle(items) {
