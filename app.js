@@ -49,10 +49,12 @@ const state = {
     active: false,
     listening: false,
     state: "READY",
+    axis: null,
     neutralTilt: null,
     smoothedTilt: 0,
     rawTilt: 0,
     lastTilt: 0,
+    recentSamples: [],
     cooldownUntil: 0,
     neutralStableSince: null,
     triggerThreshold: 45,
@@ -60,6 +62,7 @@ const state = {
     returnStabilityMs: 250,
     debounceMs: 600,
     smoothingAlpha: 0.34,
+    maxStepDegrees: 20,
     lastEventSource: "none",
   },
 };
@@ -85,6 +88,16 @@ const els = {
   currentWord: document.querySelector("#currentWord"),
   cueStage: document.querySelector("#cueStage"),
   motionFeedback: document.querySelector("#motionFeedback"),
+  motionDebug: document.querySelector("#motionDebug"),
+  motionDebugToggle: document.querySelector("#motionDebugToggle"),
+  motionDebugGrid: document.querySelector("#motionDebugGrid"),
+  motionStateValue: document.querySelector("#motionStateValue"),
+  motionAxisValue: document.querySelector("#motionAxisValue"),
+  motionRawValue: document.querySelector("#motionRawValue"),
+  motionNeutralValue: document.querySelector("#motionNeutralValue"),
+  motionRelativeValue: document.querySelector("#motionRelativeValue"),
+  motionThresholdValue: document.querySelector("#motionThresholdValue"),
+  motionNeutralZoneValue: document.querySelector("#motionNeutralZoneValue"),
   skipButton: document.querySelector("#skipButton"),
   correctButton: document.querySelector("#correctButton"),
   finalScore: document.querySelector("#finalScore"),
@@ -754,8 +767,14 @@ async function prepareMotionControls() {
 function calibrateMotion() {
   state.motion.active = true;
   state.motion.state = "READY";
-  state.motion.neutralTilt = state.motion.lastTilt;
-  state.motion.smoothedTilt = state.motion.lastTilt;
+  if (state.motion.recentSamples.length) {
+    state.motion.axis = pickDominantAxis();
+    state.motion.neutralTilt = averageAxis(state.motion.axis);
+  } else {
+    state.motion.axis = null;
+    state.motion.neutralTilt = null;
+  }
+  state.motion.smoothedTilt = state.motion.neutralTilt ?? 0;
   state.motion.cooldownUntil = 0;
   state.motion.neutralStableSince = null;
   updateMotionDebugOverlay();
@@ -764,6 +783,7 @@ function calibrateMotion() {
 function stopMotionControls() {
   state.motion.active = false;
   state.motion.state = "READY";
+  state.motion.axis = null;
   state.motion.neutralTilt = null;
   state.motion.smoothedTilt = 0;
   state.motion.cooldownUntil = 0;
@@ -771,11 +791,34 @@ function stopMotionControls() {
   updateMotionDebugOverlay();
 }
 
-function getTiltSample(event) {
-  const beta = typeof event.beta === "number" ? event.beta : 0;
-  const gamma = typeof event.gamma === "number" ? event.gamma : 0;
-  const orientationValue = Math.abs(beta) >= Math.abs(gamma) ? beta : gamma;
-  return orientationValue;
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+const TILT_CALIBRATION_WINDOW_MS = 400;
+
+function recordTiltSample(event) {
+  const beta = typeof event.beta === "number" ? event.beta : null;
+  const gamma = typeof event.gamma === "number" ? event.gamma : null;
+  if (beta == null && gamma == null) return null;
+
+  const sample = { beta: beta ?? 0, gamma: gamma ?? 0, time: Date.now() };
+  const samples = state.motion.recentSamples;
+  samples.push(sample);
+  const cutoff = sample.time - TILT_CALIBRATION_WINDOW_MS;
+  while (samples.length && samples[0].time < cutoff) samples.shift();
+  return sample;
+}
+
+function averageAxis(axis) {
+  const samples = state.motion.recentSamples;
+  if (!samples.length) return 0;
+  const total = samples.reduce((sum, sample) => sum + sample[axis], 0);
+  return total / samples.length;
+}
+
+function pickDominantAxis() {
+  return Math.abs(averageAxis("beta")) >= Math.abs(averageAxis("gamma")) ? "beta" : "gamma";
 }
 
 function updateMotionDebugOverlay() {
@@ -786,6 +829,7 @@ function updateMotionDebugOverlay() {
   const triggerThreshold = state.motion.triggerThreshold;
 
   els.motionStateValue.textContent = state.motion.state;
+  els.motionAxisValue.textContent = state.motion.axis ? state.motion.axis.toUpperCase() : "—";
   els.motionRawValue.textContent = `${state.motion.rawTilt.toFixed(1)}°`;
   els.motionNeutralValue.textContent = state.motion.neutralTilt == null ? "—" : `${state.motion.neutralTilt.toFixed(1)}°`;
   els.motionRelativeValue.textContent = `${relativeTilt.toFixed(1)}°`;
@@ -801,22 +845,26 @@ function handleDeviceMotion(event) {
 }
 
 function handleDeviceOrientation(event) {
-  const rawTilt = getTiltSample(event);
-  if (!Number.isFinite(rawTilt)) return;
+  const sample = recordTiltSample(event);
+  if (!sample) return;
 
+  const axis = state.motion.axis || pickDominantAxis();
+  const rawTilt = sample[axis];
   state.motion.rawTilt = rawTilt;
   state.motion.lastTilt = rawTilt;
   if (!state.motion.active || !state.game || state.game.finished) return;
 
   if (state.motion.neutralTilt == null) {
+    state.motion.axis = axis;
     state.motion.neutralTilt = rawTilt;
     state.motion.smoothedTilt = rawTilt;
     updateMotionDebugOverlay();
     return;
   }
 
+  const boundedRaw = clamp(rawTilt, state.motion.smoothedTilt - state.motion.maxStepDegrees, state.motion.smoothedTilt + state.motion.maxStepDegrees);
   const alpha = state.motion.smoothingAlpha;
-  state.motion.smoothedTilt = state.motion.smoothedTilt + alpha * (rawTilt - state.motion.smoothedTilt);
+  state.motion.smoothedTilt = state.motion.smoothedTilt + alpha * (boundedRaw - state.motion.smoothedTilt);
   const relativeTilt = state.motion.smoothedTilt - state.motion.neutralTilt;
   const now = Date.now();
 
@@ -892,6 +940,11 @@ function wireEvents() {
   els.startButton.addEventListener("click", startCountdown);
   els.correctButton.addEventListener("click", () => markCurrent("correct"));
   els.skipButton.addEventListener("click", () => markCurrent("skip"));
+  els.motionDebugToggle.addEventListener("click", () => {
+    const expanded = els.motionDebugToggle.getAttribute("aria-expanded") === "true";
+    els.motionDebugToggle.setAttribute("aria-expanded", String(!expanded));
+    els.motionDebugGrid.hidden = expanded;
+  });
   els.nextPlayerButton.addEventListener("click", startCountdown);
   els.playAgainButton.addEventListener("click", startCountdown);
   window.addEventListener("beforeunload", clearGameTimers);

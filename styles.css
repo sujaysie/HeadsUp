@@ -346,18 +346,41 @@ select:focus {
   backdrop-filter: blur(10px);
 }
 
+.game-hud .motion-debug {
+  grid-column: 1 / -1;
+}
+
 .motion-debug__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
   margin-bottom: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.motion-debug__header span {
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.motion-debug__header[aria-expanded="true"] span {
+  transform: rotate(180deg);
 }
 
 .motion-debug__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.motion-debug__grid[hidden] {
+  display: none;
 }
 
 .motion-debug__grid > div {
@@ -385,7 +408,7 @@ select:focus {
   gap: 12px;
 }
 
-.game-hud div {
+.game-hud > div:not(.motion-debug) {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.08);

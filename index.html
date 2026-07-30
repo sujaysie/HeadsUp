@@ -80,6 +80,21 @@
               <span>Score</span>
               <strong id="scoreValue">0</strong>
             </div>
+            <div class="motion-debug" id="motionDebug">
+              <button type="button" class="motion-debug__header" id="motionDebugToggle" aria-expanded="false" aria-controls="motionDebugGrid">
+                <strong>Tilt debug</strong>
+                <span aria-hidden="true">▾</span>
+              </button>
+              <div class="motion-debug__grid" id="motionDebugGrid" hidden>
+                <div><span>State</span><strong id="motionStateValue">READY</strong></div>
+                <div><span>Axis</span><strong id="motionAxisValue">—</strong></div>
+                <div><span>Raw</span><strong id="motionRawValue">0.0°</strong></div>
+                <div><span>Neutral</span><strong id="motionNeutralValue">—</strong></div>
+                <div><span>Relative</span><strong id="motionRelativeValue">0.0°</strong></div>
+                <div><span>Threshold</span><strong id="motionThresholdValue">45° / 15°</strong></div>
+                <div><span>In zone</span><strong id="motionNeutralZoneValue">Yes</strong></div>
+              </div>
+            </div>
           </div>
 
           <div class="cue-stage" id="cueStage">
