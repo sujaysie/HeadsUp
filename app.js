@@ -555,6 +555,7 @@ async function startCountdown() {
   state.game = {
     collectionId: collection.id,
     collectionName: collection.name,
+    allCards: cards,
     deck: shuffle(cards),
     used: [],
     currentWord: "",
@@ -595,13 +596,7 @@ function startRound() {
 
 function nextWord() {
   if (!state.game.deck.length) {
-    if (state.game.used.length) {
-      state.game.deck = shuffle(state.game.used);
-      state.game.used = [];
-    } else {
-      state.game.currentWord = "";
-      return;
-    }
+    state.game.deck = shuffle(state.game.allCards);
   }
   state.game.currentWord = state.game.deck.pop();
   state.game.used.push(state.game.currentWord);
