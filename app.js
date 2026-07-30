@@ -48,10 +48,19 @@ const state = {
   motion: {
     active: false,
     listening: false,
-    neutralPitch: null,
-    lastPitch: null,
-    armed: true,
-    debounceUntil: 0,
+    state: "READY",
+    neutralTilt: null,
+    smoothedTilt: 0,
+    rawTilt: 0,
+    lastTilt: 0,
+    cooldownUntil: 0,
+    neutralStableSince: null,
+    triggerThreshold: 45,
+    resetThreshold: 15,
+    returnStabilityMs: 250,
+    debounceMs: 600,
+    smoothingAlpha: 0.34,
+    lastEventSource: "none",
   },
 };
 
@@ -76,6 +85,14 @@ const els = {
   currentWord: document.querySelector("#currentWord"),
   cueStage: document.querySelector("#cueStage"),
   motionFeedback: document.querySelector("#motionFeedback"),
+  motionDebug: document.querySelector("#motionDebug"),
+  motionStateValue: document.querySelector("#motionStateValue"),
+  motionRawValue: document.querySelector("#motionRawValue"),
+  motionNeutralValue: document.querySelector("#motionNeutralValue"),
+  motionRelativeValue: document.querySelector("#motionRelativeValue"),
+  motionThresholdValue: document.querySelector("#motionThresholdValue"),
+  motionNeutralZoneValue: document.querySelector("#motionNeutralZoneValue"),
+  recalibrateMotionButton: document.querySelector("#recalibrateMotionButton"),
   skipButton: document.querySelector("#skipButton"),
   correctButton: document.querySelector("#correctButton"),
   finalScore: document.querySelector("#finalScore"),
@@ -602,8 +619,9 @@ function markCurrent(result) {
   } else {
     state.game.skipped.push(state.game.currentWord);
   }
-  state.motion.armed = false;
-  state.motion.debounceUntil = Date.now() + 700;
+  state.motion.state = "WAIT_FOR_RETURN";
+  state.motion.cooldownUntil = Date.now() + state.motion.debounceMs;
+  state.motion.neutralStableSince = null;
   showMotionFeedback(result);
   pulse(result);
   playTone(result);
@@ -713,69 +731,130 @@ function playTone(result) {
 }
 
 async function prepareMotionControls() {
-  if (!("DeviceOrientationEvent" in window)) return;
-  const orientation = window.DeviceOrientationEvent;
-  if (typeof orientation.requestPermission === "function") {
+  const orientationApi = window.DeviceOrientationEvent;
+  const motionApi = window.DeviceMotionEvent;
+
+  if (typeof orientationApi?.requestPermission === "function") {
     try {
-      const permission = await orientation.requestPermission();
+      const permission = await orientationApi.requestPermission();
       if (permission !== "granted") return;
     } catch {
       return;
     }
   }
+
+  if (typeof motionApi?.requestPermission === "function") {
+    try {
+      const permission = await motionApi.requestPermission();
+      if (permission !== "granted") return;
+    } catch {
+      return;
+    }
+  }
+
   if (!state.motion.listening) {
     window.addEventListener("deviceorientation", handleDeviceOrientation);
+    window.addEventListener("devicemotion", handleDeviceMotion);
     state.motion.listening = true;
   }
 }
 
 function calibrateMotion() {
   state.motion.active = true;
-  state.motion.neutralPitch = null;
-  state.motion.armed = true;
-  state.motion.debounceUntil = Date.now() + 120;
-}
-
-function getMotionTiltValue(event) {
-  const beta = typeof event.beta === "number" ? event.beta : 0;
-  const gamma = typeof event.gamma === "number" ? event.gamma : 0;
-  return Math.abs(beta) >= Math.abs(gamma) ? beta : gamma;
+  state.motion.state = "READY";
+  state.motion.neutralTilt = state.motion.lastTilt;
+  state.motion.smoothedTilt = state.motion.lastTilt;
+  state.motion.cooldownUntil = 0;
+  state.motion.neutralStableSince = null;
+  updateMotionDebugOverlay();
 }
 
 function stopMotionControls() {
   state.motion.active = false;
-  state.motion.neutralPitch = null;
-  state.motion.armed = true;
+  state.motion.state = "READY";
+  state.motion.neutralTilt = null;
+  state.motion.smoothedTilt = 0;
+  state.motion.cooldownUntil = 0;
+  state.motion.neutralStableSince = null;
+  updateMotionDebugOverlay();
+}
+
+function getTiltSample(event) {
+  const beta = typeof event.beta === "number" ? event.beta : 0;
+  const gamma = typeof event.gamma === "number" ? event.gamma : 0;
+  const orientationValue = Math.abs(beta) >= Math.abs(gamma) ? beta : gamma;
+  return orientationValue;
+}
+
+function updateMotionDebugOverlay() {
+  if (!els.motionDebug) return;
+
+  const relativeTilt = state.motion.neutralTilt == null ? 0 : state.motion.smoothedTilt - state.motion.neutralTilt;
+  const inNeutralZone = Math.abs(relativeTilt) <= state.motion.resetThreshold;
+  const triggerThreshold = state.motion.triggerThreshold;
+
+  els.motionStateValue.textContent = state.motion.state;
+  els.motionRawValue.textContent = `${state.motion.rawTilt.toFixed(1)}°`;
+  els.motionNeutralValue.textContent = state.motion.neutralTilt == null ? "—" : `${state.motion.neutralTilt.toFixed(1)}°`;
+  els.motionRelativeValue.textContent = `${relativeTilt.toFixed(1)}°`;
+  els.motionThresholdValue.textContent = `${triggerThreshold}° / ${state.motion.resetThreshold}°`;
+  els.motionNeutralZoneValue.textContent = inNeutralZone ? "Yes" : "No";
+}
+
+function handleDeviceMotion(event) {
+  if (!state.motion.active || !state.game || state.game.finished) return;
+  const motionMagnitude = Math.hypot(event.accelerationIncludingGravity?.x ?? 0, event.accelerationIncludingGravity?.y ?? 0, event.accelerationIncludingGravity?.z ?? 0);
+  state.motion.lastEventSource = motionMagnitude > 1 ? "motion" : "orientation";
+  updateMotionDebugOverlay();
 }
 
 function handleDeviceOrientation(event) {
-  const tiltValue = getMotionTiltValue(event);
-  if (!Number.isFinite(tiltValue)) return;
+  const rawTilt = getTiltSample(event);
+  if (!Number.isFinite(rawTilt)) return;
 
-  state.motion.lastPitch = tiltValue;
+  state.motion.rawTilt = rawTilt;
+  state.motion.lastTilt = rawTilt;
   if (!state.motion.active || !state.game || state.game.finished) return;
 
-  if (state.motion.neutralPitch === null) {
-    state.motion.neutralPitch = tiltValue;
+  if (state.motion.neutralTilt == null) {
+    state.motion.neutralTilt = rawTilt;
+    state.motion.smoothedTilt = rawTilt;
+    updateMotionDebugOverlay();
     return;
   }
 
-  const delta = tiltValue - state.motion.neutralPitch;
+  const alpha = state.motion.smoothingAlpha;
+  state.motion.smoothedTilt = state.motion.smoothedTilt + alpha * (rawTilt - state.motion.smoothedTilt);
+  const relativeTilt = state.motion.smoothedTilt - state.motion.neutralTilt;
   const now = Date.now();
 
-  if (!state.motion.armed) {
-    if (Math.abs(delta) <= 12 && now >= state.motion.debounceUntil) {
-      state.motion.armed = true;
+  if (state.motion.state === "WAIT_FOR_RETURN") {
+    if (Math.abs(relativeTilt) <= state.motion.resetThreshold) {
+      if (state.motion.neutralStableSince == null) {
+        state.motion.neutralStableSince = now;
+      } else if (now - state.motion.neutralStableSince >= state.motion.returnStabilityMs) {
+        state.motion.state = "READY";
+        state.motion.neutralStableSince = null;
+      }
+    } else {
+      state.motion.neutralStableSince = null;
     }
+    updateMotionDebugOverlay();
     return;
   }
 
-  if (now < state.motion.debounceUntil) return;
-  if (delta >= 35) {
+  if (now < state.motion.cooldownUntil) {
+    updateMotionDebugOverlay();
+    return;
+  }
+
+  if (relativeTilt >= state.motion.triggerThreshold) {
     markCurrent("correct");
-  } else if (delta <= -35) {
+  } else if (relativeTilt <= -state.motion.triggerThreshold) {
     markCurrent("skip");
   }
+
+  updateMotionDebugOverlay();
 }
 
 function wireGestures() {
@@ -821,6 +900,10 @@ function wireEvents() {
   els.startButton.addEventListener("click", startCountdown);
   els.correctButton.addEventListener("click", () => markCurrent("correct"));
   els.skipButton.addEventListener("click", () => markCurrent("skip"));
+  els.recalibrateMotionButton.addEventListener("click", () => {
+    calibrateMotion();
+    showMotionFeedback("correct");
+  });
   els.nextPlayerButton.addEventListener("click", startCountdown);
   els.playAgainButton.addEventListener("click", startCountdown);
   window.addEventListener("beforeunload", clearGameTimers);

@@ -71,6 +71,21 @@
         </section>
 
         <section class="screen game-screen" id="gameScreen" aria-labelledby="currentWord">
+          <div class="motion-debug" id="motionDebug" aria-live="polite">
+            <div class="motion-debug__header">
+              <strong>Motion Debug</strong>
+              <button class="secondary-button compact" id="recalibrateMotionButton" type="button">Recalibrate</button>
+            </div>
+            <div class="motion-debug__grid">
+              <div><span>State</span><strong id="motionStateValue">READY</strong></div>
+              <div><span>Raw</span><strong id="motionRawValue">0°</strong></div>
+              <div><span>Neutral</span><strong id="motionNeutralValue">—</strong></div>
+              <div><span>Relative</span><strong id="motionRelativeValue">0°</strong></div>
+              <div><span>Thresholds</span><strong id="motionThresholdValue">45° / 15°</strong></div>
+              <div><span>Neutral zone</span><strong id="motionNeutralZoneValue">Yes</strong></div>
+            </div>
+          </div>
+
           <div class="game-hud">
             <div>
               <span>Time</span>
