@@ -892,9 +892,9 @@ function handleDeviceOrientation(event) {
     return;
   }
 
-  if (relativeTilt <= -state.motion.triggerThreshold) {
+  if (relativeTilt >= state.motion.triggerThreshold) {
     markCurrent("correct");
-  } else if (relativeTilt >= state.motion.triggerThreshold) {
+  } else if (relativeTilt <= -state.motion.triggerThreshold) {
     markCurrent("skip");
   }
 
