@@ -731,9 +731,15 @@ async function prepareMotionControls() {
 
 function calibrateMotion() {
   state.motion.active = true;
-  state.motion.neutralPitch = state.motion.lastPitch ?? 0;
+  state.motion.neutralPitch = null;
   state.motion.armed = true;
-  state.motion.debounceUntil = Date.now() + 140;
+  state.motion.debounceUntil = Date.now() + 120;
+}
+
+function getMotionTiltValue(event) {
+  const beta = typeof event.beta === "number" ? event.beta : 0;
+  const gamma = typeof event.gamma === "number" ? event.gamma : 0;
+  return Math.abs(beta) >= Math.abs(gamma) ? beta : gamma;
 }
 
 function stopMotionControls() {
@@ -743,29 +749,31 @@ function stopMotionControls() {
 }
 
 function handleDeviceOrientation(event) {
-  if (typeof event.beta !== "number") return;
-  state.motion.lastPitch = event.beta;
+  const tiltValue = getMotionTiltValue(event);
+  if (!Number.isFinite(tiltValue)) return;
+
+  state.motion.lastPitch = tiltValue;
   if (!state.motion.active || !state.game || state.game.finished) return;
 
   if (state.motion.neutralPitch === null) {
-    state.motion.neutralPitch = event.beta;
+    state.motion.neutralPitch = tiltValue;
     return;
   }
 
-  const delta = event.beta - state.motion.neutralPitch;
+  const delta = tiltValue - state.motion.neutralPitch;
   const now = Date.now();
 
   if (!state.motion.armed) {
-    if (Math.abs(delta) <= 15 && now >= state.motion.debounceUntil) {
+    if (Math.abs(delta) <= 12 && now >= state.motion.debounceUntil) {
       state.motion.armed = true;
     }
     return;
   }
 
   if (now < state.motion.debounceUntil) return;
-  if (delta >= 45) {
+  if (delta >= 35) {
     markCurrent("correct");
-  } else if (delta <= -45) {
+  } else if (delta <= -35) {
     markCurrent("skip");
   }
 }
