@@ -731,9 +731,9 @@ async function prepareMotionControls() {
 
 function calibrateMotion() {
   state.motion.active = true;
-  state.motion.neutralPitch = state.motion.lastPitch;
+  state.motion.neutralPitch = state.motion.lastPitch ?? 0;
   state.motion.armed = true;
-  state.motion.debounceUntil = Date.now() + 700;
+  state.motion.debounceUntil = Date.now() + 140;
 }
 
 function stopMotionControls() {
@@ -746,28 +746,28 @@ function handleDeviceOrientation(event) {
   if (typeof event.beta !== "number") return;
   state.motion.lastPitch = event.beta;
   if (!state.motion.active || !state.game || state.game.finished) return;
+
   if (state.motion.neutralPitch === null) {
     state.motion.neutralPitch = event.beta;
     return;
   }
 
-  const delta = normalizeAngle(event.beta - state.motion.neutralPitch);
+  const delta = event.beta - state.motion.neutralPitch;
   const now = Date.now();
+
   if (!state.motion.armed) {
     if (Math.abs(delta) <= 15 && now >= state.motion.debounceUntil) {
       state.motion.armed = true;
     }
     return;
   }
-  if (now < state.motion.debounceUntil) return;
-  if (delta >= 45) markCurrent("correct");
-  if (delta <= -45) markCurrent("skip");
-}
 
-function normalizeAngle(value) {
-  if (value > 180) return value - 360;
-  if (value < -180) return value + 360;
-  return value;
+  if (now < state.motion.debounceUntil) return;
+  if (delta >= 45) {
+    markCurrent("correct");
+  } else if (delta <= -45) {
+    markCurrent("skip");
+  }
 }
 
 function wireGestures() {
