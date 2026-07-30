@@ -85,14 +85,6 @@ const els = {
   currentWord: document.querySelector("#currentWord"),
   cueStage: document.querySelector("#cueStage"),
   motionFeedback: document.querySelector("#motionFeedback"),
-  motionDebug: document.querySelector("#motionDebug"),
-  motionStateValue: document.querySelector("#motionStateValue"),
-  motionRawValue: document.querySelector("#motionRawValue"),
-  motionNeutralValue: document.querySelector("#motionNeutralValue"),
-  motionRelativeValue: document.querySelector("#motionRelativeValue"),
-  motionThresholdValue: document.querySelector("#motionThresholdValue"),
-  motionNeutralZoneValue: document.querySelector("#motionNeutralZoneValue"),
-  recalibrateMotionButton: document.querySelector("#recalibrateMotionButton"),
   skipButton: document.querySelector("#skipButton"),
   correctButton: document.querySelector("#correctButton"),
   finalScore: document.querySelector("#finalScore"),
@@ -603,8 +595,13 @@ function startRound() {
 
 function nextWord() {
   if (!state.game.deck.length) {
-    finishRound();
-    return;
+    if (state.game.used.length) {
+      state.game.deck = shuffle(state.game.used);
+      state.game.used = [];
+    } else {
+      state.game.currentWord = "";
+      return;
+    }
   }
   state.game.currentWord = state.game.deck.pop();
   state.game.used.push(state.game.currentWord);
@@ -900,10 +897,6 @@ function wireEvents() {
   els.startButton.addEventListener("click", startCountdown);
   els.correctButton.addEventListener("click", () => markCurrent("correct"));
   els.skipButton.addEventListener("click", () => markCurrent("skip"));
-  els.recalibrateMotionButton.addEventListener("click", () => {
-    calibrateMotion();
-    showMotionFeedback("correct");
-  });
   els.nextPlayerButton.addEventListener("click", startCountdown);
   els.playAgainButton.addEventListener("click", startCountdown);
   window.addEventListener("beforeunload", clearGameTimers);
