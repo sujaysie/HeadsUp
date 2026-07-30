@@ -767,14 +767,10 @@ async function prepareMotionControls() {
 function calibrateMotion() {
   state.motion.active = true;
   state.motion.state = "READY";
-  if (state.motion.recentSamples.length) {
-    state.motion.axis = pickDominantAxis();
-    state.motion.neutralTilt = averageAxis(state.motion.axis);
-  } else {
-    state.motion.axis = null;
-    state.motion.neutralTilt = null;
-  }
-  state.motion.smoothedTilt = state.motion.neutralTilt ?? 0;
+  state.motion.axis = null;
+  state.motion.recentSamples = [];
+  state.motion.neutralTilt = null;
+  state.motion.smoothedTilt = 0;
   state.motion.cooldownUntil = 0;
   state.motion.neutralStableSince = null;
   updateMotionDebugOverlay();
@@ -797,12 +793,26 @@ function clamp(value, min, max) {
 
 const TILT_CALIBRATION_WINDOW_MS = 400;
 
-function recordTiltSample(event) {
-  const beta = typeof event.beta === "number" ? event.beta : null;
-  const gamma = typeof event.gamma === "number" ? event.gamma : null;
-  if (beta == null && gamma == null) return null;
+function getTiltValue(event) {
+  const beta = typeof event.beta === "number" ? event.beta : 0;
+  const gamma = typeof event.gamma === "number" ? event.gamma : 0;
+  const orientation = window.orientation || 0;
 
-  const sample = { beta: beta ?? 0, gamma: gamma ?? 0, time: Date.now() };
+  switch (orientation) {
+    case 90:
+      return -gamma;
+    case -90:
+      return gamma;
+    default:
+      return beta;
+  }
+}
+
+function recordTiltSample(event) {
+  const value = getTiltValue(event);
+  if (!Number.isFinite(value)) return null;
+
+  const sample = { value, time: Date.now() };
   const samples = state.motion.recentSamples;
   samples.push(sample);
   const cutoff = sample.time - TILT_CALIBRATION_WINDOW_MS;
@@ -810,15 +820,11 @@ function recordTiltSample(event) {
   return sample;
 }
 
-function averageAxis(axis) {
+function averageTiltValue() {
   const samples = state.motion.recentSamples;
   if (!samples.length) return 0;
-  const total = samples.reduce((sum, sample) => sum + sample[axis], 0);
+  const total = samples.reduce((sum, sample) => sum + sample.value, 0);
   return total / samples.length;
-}
-
-function pickDominantAxis() {
-  return Math.abs(averageAxis("beta")) >= Math.abs(averageAxis("gamma")) ? "beta" : "gamma";
 }
 
 function updateMotionDebugOverlay() {
@@ -848,16 +854,14 @@ function handleDeviceOrientation(event) {
   const sample = recordTiltSample(event);
   if (!sample) return;
 
-  const axis = state.motion.axis || pickDominantAxis();
-  const rawTilt = sample[axis];
+  const rawTilt = sample.value;
   state.motion.rawTilt = rawTilt;
   state.motion.lastTilt = rawTilt;
   if (!state.motion.active || !state.game || state.game.finished) return;
 
   if (state.motion.neutralTilt == null) {
-    state.motion.axis = axis;
-    state.motion.neutralTilt = rawTilt;
-    state.motion.smoothedTilt = rawTilt;
+    state.motion.neutralTilt = averageTiltValue();
+    state.motion.smoothedTilt = state.motion.neutralTilt;
     updateMotionDebugOverlay();
     return;
   }
@@ -888,9 +892,9 @@ function handleDeviceOrientation(event) {
     return;
   }
 
-  if (relativeTilt >= state.motion.triggerThreshold) {
+  if (relativeTilt <= -state.motion.triggerThreshold) {
     markCurrent("correct");
-  } else if (relativeTilt <= -state.motion.triggerThreshold) {
+  } else if (relativeTilt >= state.motion.triggerThreshold) {
     markCurrent("skip");
   }
 
